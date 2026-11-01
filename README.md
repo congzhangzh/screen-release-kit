@@ -34,7 +34,18 @@ it is published, then a counter), as GitHub's latest release, once, never replac
 [releases/latest](../../releases/latest) always leads to a tested build. A push that changes
 nothing the package is made of (the pin, the packaging, `ci/build.sh`) publishes nothing: the
 notes of each release carry a `kit-key` naming those inputs. Pull requests and runs with
-`ref` only build and test. The package
+`ref` only build and test.
+
+**No build for an unimportant push.** [`ci/changes.sh`](ci/changes.sh) compares the push with
+the commit before it, as rdp-release-kit's `build/changes.sh` does:
+
+| What changed | What runs |
+|---|---|
+| only docs (`*.md`, `LICENSE`) or comments in `sources.lock` | nothing |
+| the other scripts or the workflow | build and test, no release (the package is the same) |
+| a pin line of `sources.lock`, `packaging/` or `ci/build.sh` | build, test and the rolling release |
+
+A run started by hand always builds. The package
 version comes from `sources.lock`: `<upstream>+r<YYYYMMDD>.<N>-<revision>`, e.g.
 `5.0.2+r20261101.1-1`, where `r<YYYYMMDD>.<N>` names the mirror's release branch. That makes it
 newer than Debian's `5.0.2-N` and older than a future `5.0.3`, so apt moves to Debian's

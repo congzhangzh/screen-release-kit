@@ -6,7 +6,10 @@ name: Build, test and publish screen
 # rdp-release-kit does: the .deb, the tarball and SHA256SUMS, as GitHub's latest release,
 # published once and never replaced. A build whose inputs (the pin, the packaging, build.sh)
 # are already released publishes nothing. A pull request, and a run with "ref", only build
-# and test.
+# and test. What a push needs comes from ci/changes.sh, as rdp-release-kit decides it: no
+# build when nothing a build reads changed (docs, the comments of sources.lock), build and
+# test only when the scripts changed, and the release only when the pin, the packaging or
+# ci/build.sh did. A run started by hand always builds.
 on:
   push:
     branches: [main]
@@ -28,7 +31,32 @@ concurrency:
   # a run still waiting (the newest pin is what ships), never one already running
 
 jobs:
+  # none, test or release (ci/changes.sh)
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      scope: ${{ steps.scope.outputs.scope }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: scope
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          case $EVENT in
+            push) scope=$(ci/changes.sh "$BEFORE" "$GITHUB_SHA") ;;
+            pull_request) scope=$(ci/changes.sh "$BASE" "$GITHUB_SHA") ;;
+            *) scope=release ;;
+          esac
+          echo "::notice::scope: $scope"
+          echo "scope=$scope" >> "$GITHUB_OUTPUT"
+
   build:
+    needs: changes
+    if: needs.changes.outputs.scope != 'none'
     runs-on: ubuntu-latest
     container: debian:testing
     timeout-minutes: 30
@@ -64,7 +92,7 @@ jobs:
           if-no-files-found: ignore
 
       - name: Publish the rolling release
-        if: env.PINNED == 'true' && github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        if: env.PINNED == 'true' && needs.changes.outputs.scope == 'release' && github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
