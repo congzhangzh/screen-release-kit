@@ -1,0 +1,104 @@
+name: Build, test and publish screen
+
+# Builds the screen commit that sources.lock pins (or, on demand, another mirror branch) as a
+# Debian package and a binary tarball in Debian testing, and tests it against an unfixed
+# control. With "publish", the pinned build becomes a kit release <YYYYMMDD>.<N> carrying the
+# .deb, the tarball and SHA256SUMS.
+on:
+  push:
+    branches: [main]
+    paths: [sources.lock, 'packaging/**', 'ci/**', .github/workflows/kit.yml]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Test this mirror branch or commit instead of the pin (e.g. integration-screen, before picking it); never published
+        default: ''
+      publish:
+        description: Publish the pinned build as a release when every test passes (main only)
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: kit-${{ github.ref }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container: debian:testing
+    timeout-minutes: 30
+    defaults:
+      run:
+        # A container job's default shell is sh (dash); the steps use bash.
+        shell: bash
+    steps:
+      - name: Get the kit and the screen source
+        env:
+          REF: ${{ inputs.ref }}
+        run: |
+          apt-get update -q
+          apt-get install -y -q --no-install-recommends git ca-certificates > /dev/null
+          git init -q kit
+          git -C kit fetch -q --depth 1 "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" "$GITHUB_SHA"
+          git -C kit checkout -q FETCH_HEAD
+          kit/ci/resolve.sh kit screen "$REF" "$GITHUB_RUN_NUMBER" | tee -a "$GITHUB_ENV"
+
+      - name: Build and test
+        run: kit/ci/run.sh screen "$SHA" "$CONTROL" "$VERSION" out
+
+      - name: Keep the build
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screen-${{ env.VERSION }}
+          path: |
+            out/*.deb
+            out/*.tar.gz
+            out/SHA256SUMS
+            out/test.log
+          if-no-files-found: ignore
+
+      - name: Publish the release
+        if: inputs.publish && env.PINNED == 'true' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          day=$(date -u +%Y%m%d)
+          n=$(( $(git -C kit ls-remote --tags "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" "refs/tags/$day.*" | wc -l) + 1 ))
+          tag=$day.$n
+          mirror=${SRC#https://github.com/}
+          mirror=${mirror%.git}
+          deb=$(cd out && ls screen_*_amd64.deb)
+          tgz=$(cd out && ls screen-*.tar.gz)
+          # shellcheck disable=SC2016 # the backticks are Markdown
+          {
+            echo "screen \`$VERSION\`, built by screen-release-kit \`${GITHUB_SHA:0:12}\` from [\`$REF\`](https://github.com/$mirror/tree/$REF) @ \`${SHA:0:12}\` and tested in Debian testing."
+            echo
+            if [ "$CONTROL" != - ]; then
+              echo "**Base:** upstream $(git -C screen log -1 --format='`%h` %s' "$CONTROL")"
+              echo
+              echo "**Our commits on top:**"
+              git -C screen log --reverse --format='- `%h` %s' "$CONTROL..$SHA"
+              echo
+            fi
+            echo "**Packaging:** Debian's screen 5.0.2-1, without the patches upstream already has (91, 95, 98, 99, 100)."
+            echo
+            echo "**Tests** (\`ci/test.sh\`):"
+            grep -E 'crashed \(|control crashed' out/test.log | sed -E 's/ \(work dir.*//; s/^/- /'
+            echo
+            echo "**Install** (Debian testing/unstable):"
+            echo '```'
+            echo "sudo apt install ./$deb"
+            echo '```'
+            echo "or, beside Debian's package, into \`~/.local\` (it then comes first in \`PATH\` and hides \`/usr/bin/screen\`):"
+            echo '```'
+            echo "mkdir -p ~/.local/lib/screen && tar -xzf $tgz -C ~/.local/lib/screen"
+            echo "ln -sfn ~/.local/lib/screen/${tgz%-linux-*}/bin/screen ~/.local/bin/screen"
+            echo '```'
+          } > out/notes.md
+          cat out/notes.md
+          CHECK_REPOS=$mirror python3 -I kit/ci/publish-release.py "$tag" "$GITHUB_SHA" \
+            "screen $VERSION" out/notes.md out/*.deb out/*.tar.gz out/SHA256SUMS

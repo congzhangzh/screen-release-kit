@@ -1,0 +1,18 @@
+# Every source the kit builds, pinned: name, version, url, commit.
+# Bump a line, push, and the kit builds and tests it; publishing is a separate, manual run.
+#
+# screen: our release, picked on the mirror as release-<YYYYMMDD>.<N> from integration-screen
+#   (upstream screen-v5 plus the fix-* branches). The version column is the Debian package
+#   version the kit builds: <upstream>+r<YYYYMMDD>.<N>-<revision>. A new pick starts at -1;
+#   a change to the kit's packaging alone bumps the revision (-2, -3, ...).
+#   r20261101.1: screen-v5 bf51977 plus fix-addwindows-killed-window (Savannah #67589).
+#   Its -1 was released from the mirror before the kit existed
+#   (https://github.com/congzhangzh/screen/releases/tag/r20261101.1).
+# screen-base: the upstream commit the pick sits on, built unfixed as the tests' control,
+#   which must crash, or the tests no longer reproduce the bug. The version column names the
+#   upstream branch, so a test build of another commit finds its own base on it. Drop the
+#   line once upstream has the fix.
+#
+# name        version              url                                                                  commit
+screen        5.0.2+r20261101.1-1  git+https://github.com/congzhangzh/screen.git#release-20261101.1      1b5ab73f44aa6c8d2d58e43aec8698133216f42f
+screen-base   screen-v5            git+https://github.com/congzhangzh/screen.git#screen-v5               bf51977cf633832a6436eed220161fd98bdbe947
