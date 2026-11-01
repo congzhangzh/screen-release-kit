@@ -2,28 +2,30 @@ name: Build, test and publish screen
 
 # Builds the screen commit that sources.lock pins (or, on demand, another mirror branch) as a
 # Debian package and a binary tarball in Debian testing, and tests it against an unfixed
-# control. With "publish", the pinned build becomes a kit release <YYYYMMDD>.<N> carrying the
-# .deb, the tarball and SHA256SUMS.
+# control. Every push to main that passes publishes the rolling release <YYYYMMDD>.<N>, as
+# rdp-release-kit does: the .deb, the tarball and SHA256SUMS, as GitHub's latest release,
+# published once and never replaced. A build whose inputs (the pin, the packaging, build.sh)
+# are already released publishes nothing. A pull request, and a run with "ref", only build
+# and test.
 on:
   push:
     branches: [main]
-    paths: [sources.lock, 'packaging/**', 'ci/**', .github/workflows/kit.yml]
+    # a change no build reads makes no new release
+    paths-ignore: ['**.md', LICENSE]
   pull_request:
   workflow_dispatch:
     inputs:
       ref:
         description: Test this mirror branch or commit instead of the pin (e.g. integration-screen, before picking it); never published
         default: ''
-      publish:
-        description: Publish the pinned build as a release when every test passes (main only)
-        type: boolean
-        default: false
 
 permissions:
   contents: write
 
 concurrency:
   group: kit-${{ github.ref }}
+  # one run at a time, so each counts <N> from the releases before it; a newer push replaces
+  # a run still waiting (the newest pin is what ships), never one already running
 
 jobs:
   build:
@@ -61,14 +63,16 @@ jobs:
             out/test.log
           if-no-files-found: ignore
 
-      - name: Publish the release
-        if: inputs.publish && env.PINNED == 'true' && github.ref == 'refs/heads/main'
+      - name: Publish the rolling release
+        if: env.PINNED == 'true' && github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           day=$(date -u +%Y%m%d)
           n=$(( $(git -C kit ls-remote --tags "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" "refs/tags/$day.*" | wc -l) + 1 ))
           tag=$day.$n
+          # what the package is made of; the same key again publishes nothing
+          key="screen $VERSION ${SHA:0:12}, packaging $(git -C kit rev-parse --short=12 HEAD:packaging), build.sh $(git -C kit rev-parse --short=12 HEAD:ci/build.sh)"
           mirror=${SRC#https://github.com/}
           mirror=${mirror%.git}
           deb=$(cd out && ls screen_*_amd64.deb)
@@ -98,7 +102,9 @@ jobs:
             echo "mkdir -p ~/.local/lib/screen && tar -xzf $tgz -C ~/.local/lib/screen"
             echo "ln -sfn ~/.local/lib/screen/${tgz%-linux-*}/bin/screen ~/.local/bin/screen"
             echo '```'
+            echo
+            echo "Published once, never replaced. <!-- kit-key: $key --> <!-- version: $VERSION -->"
           } > out/notes.md
           cat out/notes.md
-          CHECK_REPOS=$mirror python3 -I kit/ci/publish-release.py "$tag" "$GITHUB_SHA" \
-            "screen $VERSION" out/notes.md out/*.deb out/*.tar.gz out/SHA256SUMS
+          KEY=$key CHECK_REPOS=$mirror python3 -I kit/ci/publish-release.py "$tag" "$GITHUB_SHA" \
+            "screen $VERSION, $tag" out/notes.md out/*.deb out/*.tar.gz out/SHA256SUMS

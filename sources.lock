@@ -1,5 +1,5 @@
 # Every source the kit builds, pinned: name, version, url, commit.
-# Bump a line, push, and the kit builds and tests it; publishing is a separate, manual run.
+# Bump a line and push to main: the kit builds and tests it and publishes the rolling release.
 #
 # screen: our release, picked on the mirror as release-<YYYYMMDD>.<N> from integration-screen
 #   (upstream screen-v5 plus the fix-* branches). The version column is the Debian package

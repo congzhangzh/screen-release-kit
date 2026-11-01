@@ -26,16 +26,22 @@ the commands. Note that `~/.local/bin` comes first in most `PATH`s, so a `screen
 | mirror, `integration-screen` | `screen-v5` plus every `fix-*` branch, rebuilt whenever one of them or the base moves |
 | kit, run with `ref` | Tests a mirror branch before it is picked: `gh workflow run kit.yml -R congzhangzh/screen-release-kit -f ref=integration-screen` |
 | mirror, `release-YYYYMMDD.N` | A tested `integration-screen` commit, picked as a release; never moves |
-| kit, `sources.lock` | Pins that commit and the package version; a push builds and tests it |
-| kit, run with `publish` | Publishes the pinned build: `gh workflow run kit.yml -R congzhangzh/screen-release-kit -f publish=true` |
+| kit, `sources.lock` | Pins that commit and the package version; the push to `main` builds and tests it and publishes the rolling release |
 
-The kit release is tagged `<YYYYMMDD>.<N>`, after the day it is published. The package
+**Rolling releases**, as [rdp-release-kit](https://github.com/congzhangzh/rdp-release-kit)
+makes them: every push to `main` that passes publishes the release `<YYYYMMDD>.<N>` (the day
+it is published, then a counter), as GitHub's latest release, once, never replaced. So
+[releases/latest](../../releases/latest) always leads to a tested build. A push that changes
+nothing the package is made of (the pin, the packaging, `ci/build.sh`) publishes nothing: the
+notes of each release carry a `kit-key` naming those inputs. Pull requests and runs with
+`ref` only build and test. The package
 version comes from `sources.lock`: `<upstream>+r<YYYYMMDD>.<N>-<revision>`, e.g.
 `5.0.2+r20261101.1-1`, where `r<YYYYMMDD>.<N>` names the mirror's release branch. That makes it
 newer than Debian's `5.0.2-N` and older than a future `5.0.3`, so apt moves to Debian's
 package once Debian ships a newer upstream release. A new pick starts at revision 1; a change
-to the kit's packaging alone bumps the revision. A package version is released once: the
-publish step refuses a version that a release here or in the mirror already has.
+to the kit's packaging alone bumps the revision. A package version is released once: when a
+release here or in the mirror already has it, the run publishes nothing and warns that the
+revision needs a bump.
 
 The first release, `5.0.2+r20261101.1-1`, was published from the mirror before this kit
 existed: <https://github.com/congzhangzh/screen/releases/tag/r20261101.1>.
@@ -59,10 +65,11 @@ container:
    must survive 10 runs with two attached displays and 3 with one, and the control must crash
    at least once, or the test no longer reproduces the bug
    ([Savannah #67589](https://savannah.gnu.org/bugs/?67589)).
-6. With `publish`, on `main`, for the pin only, and only when every test passed,
-   [`ci/publish-release.py`](ci/publish-release.py) makes a draft release with the assets,
-   then publishes it, which creates the tag; a failure leaves at most a draft. Otherwise the
-   build is kept as a workflow artifact.
+6. On `main`, for the pin only, and only when every test passed,
+   [`ci/publish-release.py`](ci/publish-release.py) publishes the rolling release unless its
+   inputs or its version are already released: a draft with the assets first, then the
+   release, which creates the tag, so a failure leaves at most a draft. Every run also keeps
+   its build as a workflow artifact.
 
 The same pipeline runs locally in a container:
 
